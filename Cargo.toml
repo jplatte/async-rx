@@ -1,0 +1,11 @@
+[package]
+name = "async-rx"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+description = "Utility functions for async reactive programming."
+repository = "https://codeberg.org/jplatte/async-rx"
+
+[dependencies]
+futures-core = { version = "0.3.28", default-features = false }
+pin-project-lite = "0.2.9"
