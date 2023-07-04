@@ -9,3 +9,7 @@ repository = "https://codeberg.org/jplatte/async-rx"
 [dependencies]
 futures-core = { version = "0.3.28", default-features = false }
 pin-project-lite = "0.2.9"
+
+[dev-dependencies]
+futures-util = "0.3.28"
+stream_assert = "0.1.0"
