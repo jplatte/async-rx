@@ -7,10 +7,16 @@
 #![warn(missing_docs)]
 
 use core::{
+    mem,
     pin::Pin,
     task::{ready, Context, Poll},
 };
 
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
+#[cfg(feature = "alloc")]
+use alloc::vec::Vec;
 use futures_core::Stream;
 use pin_project_lite::pin_project;
 
@@ -38,6 +44,19 @@ pub trait StreamExt: Stream + Sized {
         F: FnMut(&Self::Item) -> T,
     {
         DedupByKey::new(self, key_fn)
+    }
+
+    /// Buffer the items from `self` until `batch_done_stream` produces a value,
+    /// and return all buffered values in one batch.
+    ///
+    /// `batch_done_stream` is polled after all ready items from `self` has been
+    /// read.
+    #[cfg(feature = "alloc")]
+    fn batch_with<S>(self, batch_done_stream: S) -> BatchWith<Self, S>
+    where
+        S: Stream<Item = ()>,
+    {
+        BatchWith::new(self, batch_done_stream)
     }
 }
 
@@ -84,7 +103,7 @@ where
 
 pin_project! {
     /// Stream adapter produced by [`StreamExt::dedup_by_key`].
-    pub struct DedupByKey<S: Stream, T, F> {
+    pub struct DedupByKey<S, T, F> {
         #[pin]
         inner: S,
         key_fn: F,
@@ -92,7 +111,7 @@ pin_project! {
     }
 }
 
-impl<S: Stream, T, F> DedupByKey<S, T, F> {
+impl<S, T, F> DedupByKey<S, T, F> {
     fn new(inner: S, key_fn: F) -> Self {
         Self { inner, key_fn, prev_key: None }
     }
@@ -122,5 +141,48 @@ where
             }
         };
         Poll::Ready(next)
+    }
+}
+
+#[cfg(feature = "alloc")]
+pin_project! {
+    /// Stream adapter produced by [`StreamExt::batch_with`].
+    pub struct BatchWith<S1: Stream, S2> {
+        #[pin]
+        primary_stream: S1,
+        #[pin]
+        batch_done_stream: S2,
+        batch: Vec<S1::Item>,
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<S1: Stream, S2> BatchWith<S1, S2> {
+    fn new(primary_stream: S1, batch_done_stream: S2) -> Self {
+        Self { primary_stream, batch_done_stream, batch: Vec::new() }
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<S1, S2> Stream for BatchWith<S1, S2>
+where
+    S1: Stream,
+    S2: Stream<Item = ()>,
+{
+    type Item = Vec<S1::Item>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let mut this = self.project();
+        loop {
+            match this.primary_stream.as_mut().poll_next(cx) {
+                Poll::Ready(Some(item)) => this.batch.push(item),
+                Poll::Ready(None) if this.batch.is_empty() => return Poll::Ready(None),
+                Poll::Ready(None) => return Poll::Ready(Some(mem::take(this.batch))),
+                Poll::Pending => break,
+            }
+        }
+
+        ready!(this.batch_done_stream.poll_next(cx));
+        Poll::Ready(Some(mem::take(this.batch)))
     }
 }
