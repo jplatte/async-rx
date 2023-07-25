@@ -4,7 +4,31 @@
 //! are not already found in `futures-util`. It is meant as a supplement, not a
 //! replacement for existing
 #![no_std]
-#![warn(missing_docs)]
+#![warn(
+    missing_debug_implementations,
+    missing_docs,
+    rust_2018_idioms,
+    semicolon_in_expressions_from_macros,
+    unreachable_pub,
+    unused_import_braces,
+    unused_qualifications,
+    clippy::branches_sharing_code,
+    clippy::cloned_instead_of_copied,
+    clippy::dbg_macro,
+    clippy::empty_line_after_outer_attr,
+    clippy::inefficient_to_string,
+    clippy::macro_use_imports,
+    clippy::map_flatten,
+    clippy::mod_module_files,
+    clippy::mut_mut,
+    clippy::nonstandard_macro_braces,
+    clippy::semicolon_if_nothing_returned,
+    clippy::str_to_string,
+    clippy::todo,
+    clippy::unreadable_literal,
+    clippy::unseparated_literal_suffix,
+    clippy::wildcard_imports
+)]
 
 use core::{
     mem,
