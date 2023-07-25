@@ -4,7 +4,7 @@ version = "0.1.1"
 edition = "2021"
 license = "MPL-2.0"
 description = "Utility functions for async reactive programming."
-repository = "https://codeberg.org/jplatte/async-rx"
+repository = "https://github.com/jplatte/async-rx"
 categories = ["asynchronous", "gui"]
 keywords = ["async", "reactive"]
 
