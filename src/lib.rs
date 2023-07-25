@@ -75,6 +75,12 @@ pub trait StreamExt: Stream + Sized {
     ///
     /// `batch_done_stream` is polled after all ready items from `self` has been
     /// read.
+    ///
+    /// Examples for possible `batch_done_stream`s:
+    ///
+    /// - `futures_channel::mpsc::Receiver<()>`
+    /// - `tokio_stream::wrappers::IntervalStream` with its item type mapped to
+    ///   `()` using `.map(|_| ())` (`use tokio_stream::StreamExt` for `map`)
     #[cfg(feature = "alloc")]
     fn batch_with<S>(self, batch_done_stream: S) -> BatchWith<Self, S>
     where
