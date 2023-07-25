@@ -2,7 +2,7 @@
 //!
 //! This crate is intentionally very small as it only provides utilities that
 //! are not already found in `futures-util`. It is meant as a supplement, not a
-//! replacement for existing
+//! replacement for the existing well-known futures crates.
 #![no_std]
 #![warn(
     missing_debug_implementations,
