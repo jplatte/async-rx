@@ -88,6 +88,20 @@ pub trait StreamExt: Stream + Sized {
     {
         BatchWith::new(self, batch_done_stream)
     }
+
+    /// Flattens a stream of streams by always keeping one inner stream and
+    /// yielding its items until the outer stream produces a new inner stream,
+    /// at which point the inner stream to yield items from is switched to the
+    /// new one.
+    ///
+    /// Equivalent to RxJS'es
+    /// [`switchAll`](https://rxjs.dev/api/index/function/switchAll).
+    fn switch(self) -> Switch<Self>
+    where
+        Self::Item: Stream,
+    {
+        Switch::new(self)
+    }
 }
 
 impl<S: Stream> StreamExt for S {}
@@ -214,5 +228,77 @@ where
 
         ready!(this.batch_done_stream.poll_next(cx));
         Poll::Ready(Some(mem::take(this.batch)))
+    }
+}
+
+pin_project! {
+    /// Stream adapter produced by [`StreamExt::switch`].
+    pub struct Switch<S: Stream> {
+        #[pin]
+        outer_stream: S,
+        #[pin]
+        state: SwitchState<S::Item>,
+    }
+}
+
+pin_project! {
+    #[project = SwitchStateProj]
+    enum SwitchState<S> {
+        None,
+        Some {
+            #[pin]
+            inner_stream: S,
+        }
+    }
+}
+
+impl<S: Stream> Switch<S> {
+    fn new(outer_stream: S) -> Self {
+        Self { outer_stream, state: SwitchState::None }
+    }
+}
+
+impl<S> Stream for Switch<S>
+where
+    S: Stream,
+    S::Item: Stream,
+{
+    type Item = <S::Item as Stream>::Item;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let mut this = self.project();
+
+        let mut outer_stream_closed = false;
+        while let Poll::Ready(ready) = this.outer_stream.as_mut().poll_next(cx) {
+            match ready {
+                Some(inner_stream) => {
+                    this.state.set(SwitchState::Some { inner_stream });
+                }
+                None => {
+                    outer_stream_closed = true;
+                    break;
+                }
+            }
+        }
+
+        match this.state.project() {
+            // No inner stream has been produced yet.
+            SwitchStateProj::None => {
+                if outer_stream_closed {
+                    Poll::Ready(None)
+                } else {
+                    Poll::Pending
+                }
+            }
+            // An inner stream exists => poll it.
+            SwitchStateProj::Some { inner_stream } => match inner_stream.poll_next(cx) {
+                // Inner stream produced an item.
+                Poll::Ready(Some(item)) => Poll::Ready(Some(item)),
+                // Both inner and outer stream are closed.
+                Poll::Ready(None) if outer_stream_closed => Poll::Ready(None),
+                // Only inner stream is closed, or inner stream is pending.
+                Poll::Ready(None) | Poll::Pending => Poll::Pending,
+            },
+        }
     }
 }

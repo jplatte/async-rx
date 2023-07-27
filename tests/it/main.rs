@@ -6,6 +6,8 @@ use stream_assert::{assert_closed, assert_next_eq, assert_pending};
 use tokio::sync::mpsc::{channel, unbounded_channel};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 
+mod switch;
+
 #[test]
 fn dedup_empty() {
     let mut stream = stream::empty::<u8>().dedup();
