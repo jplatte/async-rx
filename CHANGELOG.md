@@ -1,4 +1,4 @@
-# unreleased
+# 0.1.2
 
 - Add `StreamExt::switch` for dynamically switching over from one stream to the
   next as soon as it's ready
