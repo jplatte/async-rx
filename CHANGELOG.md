@@ -1,3 +1,8 @@
+# 0.1.3
+
+- Fix `BatchWith` yielding an empty `Vec` when the secondary stream yields an
+  item without the primary stream having yielded any
+
 # 0.1.2
 
 - Add `StreamExt::switch` for dynamically switching over from one stream to the
