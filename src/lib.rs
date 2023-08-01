@@ -219,17 +219,27 @@ where
         let mut this = self.project();
         loop {
             match this.primary_stream.as_mut().poll_next(cx) {
+                // Primary stream produced a new item
                 Poll::Ready(Some(item)) => this.batch.push(item),
-                Poll::Ready(None) if this.batch.is_empty() => return Poll::Ready(None),
-                Poll::Ready(None) => return Poll::Ready(Some(mem::take(this.batch))),
+                // Primary stream is closed, don't wait for batch_done_stream
+                Poll::Ready(None) => {
+                    let has_pending_items = !this.batch.is_empty();
+                    return Poll::Ready(has_pending_items.then(|| mem::take(this.batch)));
+                }
+                // Primary stream is pending (and this task is scheduled for wakeup on new items)
                 Poll::Pending => break,
             }
         }
 
+        // Primary stream is pending, check the batch_done_stream
         ready!(this.batch_done_stream.poll_next(cx));
+
+        // batch_done_stream produced an item …
         if this.batch.is_empty() {
+            // … but we didn't queue any items from the primary stream.
             Poll::Pending
         } else {
+            // … and we have some queued items.
             Poll::Ready(Some(mem::take(this.batch)))
         }
     }
