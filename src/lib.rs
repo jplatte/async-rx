@@ -227,7 +227,11 @@ where
         }
 
         ready!(this.batch_done_stream.poll_next(cx));
-        Poll::Ready(Some(mem::take(this.batch)))
+        if this.batch.is_empty() {
+            Poll::Pending
+        } else {
+            Poll::Ready(Some(mem::take(this.batch)))
+        }
     }
 }
 
