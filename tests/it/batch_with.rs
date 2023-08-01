@@ -1,6 +1,7 @@
 use std::error::Error;
 
 use async_rx::StreamExt as _;
+use futures_util::stream;
 use stream_assert::{assert_closed, assert_next_eq, assert_pending};
 use tokio::sync::mpsc::{channel, unbounded_channel};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
@@ -65,7 +66,7 @@ async fn batch_with() -> Result<(), Box<dyn Error>> {
 }
 
 #[tokio::test]
-async fn empty_batch_with() -> Result<(), Box<dyn Error>> {
+async fn empty_primary_stream() {
     let (_drainer, drainer_receiver) = channel::<()>(1);
 
     let (stream_sender, stream_receiver) = unbounded_channel::<usize>();
@@ -78,6 +79,31 @@ async fn empty_batch_with() -> Result<(), Box<dyn Error>> {
     // Stopping the batch stream forces it to drain its items. There was no item in
     // it, so it's closed immediately.
     assert_closed!(batch_stream);
+}
+
+#[tokio::test]
+async fn trigger_happy_batch_stream() -> Result<(), Box<dyn Error>> {
+    let (drainer, drainer_receiver) = unbounded_channel::<()>();
+
+    let mut stream =
+        stream::pending::<u8>().batch_with(UnboundedReceiverStream::new(drainer_receiver));
+
+    // The primary stream is always pending, the combined stream should be too.
+    assert_pending!(stream);
+
+    // Even if the drainer stream produces items.
+    drainer.send(())?;
+    assert_pending!(stream);
+
+    // However many!
+    drainer.send(())?;
+    drainer.send(())?;
+    drainer.send(())?;
+
+    assert_pending!(stream);
+    assert_pending!(stream);
+    assert_pending!(stream);
+    assert_pending!(stream);
 
     Ok(())
 }
