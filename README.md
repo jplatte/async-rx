@@ -9,3 +9,4 @@ Currently provided functionality:
 - `StreamExt::dedup` for deduplicating consecutive equal items
 - `StreamExt::dedup_by_key` for deduplicating consecutive items with an equal property
 - `StreamExt::batch_with` for flexible batching of the stream's items
+- `StreamExt::switch` for switching a stream of streams
