@@ -1,3 +1,7 @@
+# 0.2.0
+
+- Change `Switch` to require the outer stream to be a `FusedStream`
+
 # 0.1.3
 
 - Fix `BatchWith` yielding an empty `Vec` when the secondary stream yields an
