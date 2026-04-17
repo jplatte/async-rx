@@ -41,7 +41,7 @@ extern crate alloc;
 
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
-use futures_core::Stream;
+use futures_core::{FusedStream, Stream};
 use pin_project_lite::pin_project;
 
 /// Extensions to the [`Stream`] trait.
@@ -98,6 +98,7 @@ pub trait StreamExt: Stream + Sized {
     /// [`switchAll`](https://rxjs.dev/api/index/function/switchAll).
     fn switch(self) -> Switch<Self>
     where
+        Self: FusedStream,
         Self::Item: Stream,
     {
         Switch::new(self)
@@ -250,21 +251,23 @@ pin_project! {
     pub struct Switch<S: Stream> {
         #[pin]
         outer_stream: S,
-        outer_stream_is_closed: bool,
         #[pin]
         state: Option<S::Item>,
     }
 }
 
-impl<S: Stream> Switch<S> {
+impl<S> Switch<S>
+where
+    S: FusedStream,
+{
     fn new(outer_stream: S) -> Self {
-        Self { outer_stream, outer_stream_is_closed: false, state: None }
+        Self { outer_stream, state: None }
     }
 }
 
 impl<S> Stream for Switch<S>
 where
-    S: Stream,
+    S: FusedStream,
     S::Item: Stream,
 {
     type Item = <S::Item as Stream>::Item;
@@ -272,14 +275,16 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
 
-        if !*this.outer_stream_is_closed {
+        let mut outer_stream_is_closed = this.outer_stream.is_terminated();
+
+        if !outer_stream_is_closed {
             while let Poll::Ready(ready) = this.outer_stream.as_mut().poll_next(cx) {
                 match ready {
                     Some(inner_stream) => {
                         this.state.set(Some(inner_stream));
                     }
                     None => {
-                        *this.outer_stream_is_closed = true;
+                        outer_stream_is_closed = true;
                         break;
                     }
                 }
@@ -289,7 +294,7 @@ where
         match this.state.as_mut().as_pin_mut() {
             // No inner stream has been produced yet.
             None => {
-                if *this.outer_stream_is_closed {
+                if outer_stream_is_closed {
                     Poll::Ready(None)
                 } else {
                     Poll::Pending
@@ -300,7 +305,7 @@ where
                 // Inner stream produced an item.
                 Poll::Ready(Some(item)) => Poll::Ready(Some(item)),
                 // Both inner and outer stream are closed.
-                Poll::Ready(None) if *this.outer_stream_is_closed => Poll::Ready(None),
+                Poll::Ready(None) if outer_stream_is_closed => Poll::Ready(None),
                 // Only inner stream is closed, or inner stream is pending.
                 Poll::Ready(None) | Poll::Pending => Poll::Pending,
             },
