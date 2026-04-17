@@ -41,7 +41,7 @@ extern crate alloc;
 
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
-use futures_core::Stream;
+use futures_core::{FusedStream, Stream};
 use pin_project_lite::pin_project;
 
 /// Extensions to the [`Stream`] trait.
@@ -98,6 +98,7 @@ pub trait StreamExt: Stream + Sized {
     /// [`switchAll`](https://rxjs.dev/api/index/function/switchAll).
     fn switch(self) -> Switch<Self>
     where
+        Self: FusedStream,
         Self::Item: Stream,
     {
         Switch::new(self)
@@ -251,30 +252,22 @@ pin_project! {
         #[pin]
         outer_stream: S,
         #[pin]
-        state: SwitchState<S::Item>,
+        state: Option<S::Item>,
     }
 }
 
-pin_project! {
-    #[project = SwitchStateProj]
-    enum SwitchState<S> {
-        None,
-        Some {
-            #[pin]
-            inner_stream: S,
-        }
-    }
-}
-
-impl<S: Stream> Switch<S> {
+impl<S> Switch<S>
+where
+    S: FusedStream,
+{
     fn new(outer_stream: S) -> Self {
-        Self { outer_stream, state: SwitchState::None }
+        Self { outer_stream, state: None }
     }
 }
 
 impl<S> Stream for Switch<S>
 where
-    S: Stream,
+    S: FusedStream,
     S::Item: Stream,
 {
     type Item = <S::Item as Stream>::Item;
@@ -282,34 +275,37 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
 
-        let mut outer_stream_closed = false;
-        while let Poll::Ready(ready) = this.outer_stream.as_mut().poll_next(cx) {
-            match ready {
-                Some(inner_stream) => {
-                    this.state.set(SwitchState::Some { inner_stream });
-                }
-                None => {
-                    outer_stream_closed = true;
-                    break;
+        let mut outer_stream_is_closed = this.outer_stream.is_terminated();
+
+        if !outer_stream_is_closed {
+            while let Poll::Ready(ready) = this.outer_stream.as_mut().poll_next(cx) {
+                match ready {
+                    Some(inner_stream) => {
+                        this.state.set(Some(inner_stream));
+                    }
+                    None => {
+                        outer_stream_is_closed = true;
+                        break;
+                    }
                 }
             }
         }
 
-        match this.state.project() {
+        match this.state.as_mut().as_pin_mut() {
             // No inner stream has been produced yet.
-            SwitchStateProj::None => {
-                if outer_stream_closed {
+            None => {
+                if outer_stream_is_closed {
                     Poll::Ready(None)
                 } else {
                     Poll::Pending
                 }
             }
             // An inner stream exists => poll it.
-            SwitchStateProj::Some { inner_stream } => match inner_stream.poll_next(cx) {
+            Some(inner_stream) => match inner_stream.poll_next(cx) {
                 // Inner stream produced an item.
                 Poll::Ready(Some(item)) => Poll::Ready(Some(item)),
                 // Both inner and outer stream are closed.
-                Poll::Ready(None) if outer_stream_closed => Poll::Ready(None),
+                Poll::Ready(None) if outer_stream_is_closed => Poll::Ready(None),
                 // Only inner stream is closed, or inner stream is pending.
                 Poll::Ready(None) | Poll::Pending => Poll::Pending,
             },
