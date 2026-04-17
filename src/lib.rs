@@ -250,25 +250,15 @@ pin_project! {
     pub struct Switch<S: Stream> {
         #[pin]
         outer_stream: S,
+        outer_stream_is_closed: bool,
         #[pin]
-        state: SwitchState<S::Item>,
-    }
-}
-
-pin_project! {
-    #[project = SwitchStateProj]
-    enum SwitchState<S> {
-        None,
-        Some {
-            #[pin]
-            inner_stream: S,
-        }
+        state: Option<S::Item>,
     }
 }
 
 impl<S: Stream> Switch<S> {
     fn new(outer_stream: S) -> Self {
-        Self { outer_stream, state: SwitchState::None }
+        Self { outer_stream, outer_stream_is_closed: false, state: None }
     }
 }
 
@@ -282,34 +272,35 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
 
-        let mut outer_stream_closed = false;
-        while let Poll::Ready(ready) = this.outer_stream.as_mut().poll_next(cx) {
-            match ready {
-                Some(inner_stream) => {
-                    this.state.set(SwitchState::Some { inner_stream });
-                }
-                None => {
-                    outer_stream_closed = true;
-                    break;
+        if !*this.outer_stream_is_closed {
+            while let Poll::Ready(ready) = this.outer_stream.as_mut().poll_next(cx) {
+                match ready {
+                    Some(inner_stream) => {
+                        this.state.set(Some(inner_stream));
+                    }
+                    None => {
+                        *this.outer_stream_is_closed = true;
+                        break;
+                    }
                 }
             }
         }
 
-        match this.state.project() {
+        match this.state.as_mut().as_pin_mut() {
             // No inner stream has been produced yet.
-            SwitchStateProj::None => {
-                if outer_stream_closed {
+            None => {
+                if *this.outer_stream_is_closed {
                     Poll::Ready(None)
                 } else {
                     Poll::Pending
                 }
             }
             // An inner stream exists => poll it.
-            SwitchStateProj::Some { inner_stream } => match inner_stream.poll_next(cx) {
+            Some(inner_stream) => match inner_stream.poll_next(cx) {
                 // Inner stream produced an item.
                 Poll::Ready(Some(item)) => Poll::Ready(Some(item)),
                 // Both inner and outer stream are closed.
-                Poll::Ready(None) if outer_stream_closed => Poll::Ready(None),
+                Poll::Ready(None) if *this.outer_stream_is_closed => Poll::Ready(None),
                 // Only inner stream is closed, or inner stream is pending.
                 Poll::Ready(None) | Poll::Pending => Poll::Pending,
             },
